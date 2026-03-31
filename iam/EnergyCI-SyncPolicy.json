@@ -1,0 +1,39 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListGlueAssetsBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::your-glue-assets-bucket-name"
+      ]
+    },
+    {
+      "Sid": "ObjectsGlueAssets",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::your-glue-assets-bucket-name/*"
+      ]
+    },
+    {
+      "Sid": "OptionalStartGlueWorkflow",
+      "Effect": "Allow",
+      "Action": [
+        "glue:StartWorkflowRun",
+        "glue:StartJobRun"
+      ],
+      "Resource": [
+        "arn:aws:glue:REGION:ACCOUNT_ID:workflow/*",
+        "arn:aws:glue:REGION:ACCOUNT_ID:job/*"
+      ]
+    }
+  ]
+}

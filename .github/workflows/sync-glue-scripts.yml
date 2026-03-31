@@ -1,0 +1,48 @@
+name: Sync Glue Scripts (simple CI)
+
+on:
+  push:
+    paths:
+      - 'processes/**'
+    branches:
+      - main
+      - develop
+      - dev
+      - lab
+      - prd
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_SYNC_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SYNC_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Determine environment
+        id: env
+        run: |
+          BRANCH=${GITHUB_REF#refs/heads/}
+          if [[ "$BRANCH" == "main" || "$BRANCH" == "prd" ]]; then echo "env=prd" >> $GITHUB_OUTPUT
+          elif [[ "$BRANCH" == "lab" ]]; then echo "env=lab" >> $GITHUB_OUTPUT
+          else echo "env=dev" >> $GITHUB_OUTPUT; fi
+
+      - name: Sync processes/ to S3
+        run: |
+          ENV=${{ steps.env.outputs.env }}
+          if [[ "$ENV" == "prd" ]]; then BUCKET=${{ secrets.S3_GLUE_ASSETS_BUCKET_PRD }} ;
+          elif [[ "$ENV" == "lab" ]]; then BUCKET=${{ secrets.S3_GLUE_ASSETS_BUCKET_LAB }} ;
+          else BUCKET=${{ secrets.S3_GLUE_ASSETS_BUCKET_DEV }} ; fi
+          echo "Syncing to s3://$BUCKET/scripts/$ENV/"
+          aws s3 sync processes/ s3://$BUCKET/scripts/$ENV/ --exclude "*.pyc" --delete
+
+      - name: (Optional) Start Glue workflow (dev)
+        if: ${{ github.ref == 'refs/heads/dev' }}
+        run: |
+          aws glue start-workflow-run --name energy-workflow-dev
