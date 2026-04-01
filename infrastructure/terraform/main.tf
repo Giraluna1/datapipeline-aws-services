@@ -127,6 +127,35 @@ resource "aws_lakeformation_permissions" "glue_role_gold" {
   }
 }
 
+# LF: permisos sobre la database del catálogo (governance real)
+resource "aws_lakeformation_permissions" "glue_role_database" {
+  principal   = module.iam.glue_role_arn
+  permissions = ["CREATE_TABLE", "DESCRIBE", "ALTER"]
+
+  database {
+    name = aws_glue_catalog_database.this.name
+  }
+}
+
+resource "aws_lakeformation_permissions" "athena_consumer_database" {
+  principal   = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/athena-consumer-role-${var.environment}"
+  permissions = ["DESCRIBE"]
+
+  database {
+    name = aws_glue_catalog_database.this.name
+  }
+}
+
+resource "aws_lakeformation_permissions" "athena_consumer_tables" {
+  principal   = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/athena-consumer-role-${var.environment}"
+  permissions = ["SELECT", "DESCRIBE"]
+
+  table {
+    database_name = aws_glue_catalog_database.this.name
+    wildcard      = true
+  }
+}
+
 # example instantiation of glue job modules for each process
 module "bronze_ingestion" {
   source = "./modules/glue/jobs"
@@ -255,6 +284,7 @@ module "silver_athena_export" {
   environment   = var.environment
   common_tags   = var.common_tags
 }
+
 module "gold_analytics" {
   source = "./modules/glue/jobs"
   job_name = "energy-gold-analytics-${var.environment}"
@@ -289,9 +319,9 @@ module "redshift_load" {
     redshift_iam_role_arn = var.redshift.iam_role_arn
     additional_python_modules = "awswrangler==3.10.1"
     additional_arguments = {
-      "--REDSHIFT_DATABASE"  = var.redshift.database
-      "--REDSHIFT_DB_USER"   = var.redshift.db_user
-      "--REDSHIFT_CLUSTER_ID"= var.redshift.cluster_id
+      "--REDSHIFT_DATABASE"   = var.redshift.database
+      "--REDSHIFT_DB_USER"    = var.redshift.db_user
+      "--REDSHIFT_CLUSTER_ID" = var.redshift.cluster_id
     }
   }
   s3_buckets    = module.s3.bucket_names
@@ -391,8 +421,8 @@ resource "aws_glue_trigger" "t_gold_after_silver" {
     job_name = module.gold_analytics.job_name
   }
   predicate {
-    conditions { job_name = module.silver_tx_curated.job_name state = "SUCCEEDED" }
-    conditions { job_name = module.silver_tx_agg.job_name     state = "SUCCEEDED" }
+    conditions { job_name = module.silver_tx_curated.job_name   state = "SUCCEEDED" }
+    conditions { job_name = module.silver_tx_agg.job_name       state = "SUCCEEDED" }
     conditions { job_name = module.silver_prov_curated.job_name state = "SUCCEEDED" }
     conditions { job_name = module.silver_cli_curated.job_name  state = "SUCCEEDED" }
     logical = "AND"
@@ -432,6 +462,7 @@ resource "aws_glue_trigger" "t_crawler_bronze" {
   }
 }
 
+# ✅ CORREGIDO: espera a todos los jobs silver antes de crawlear silver
 resource "aws_glue_trigger" "t_crawler_silver" {
   name          = "t-crawler-silver-${var.environment}"
   type          = "CONDITIONAL"
@@ -440,10 +471,10 @@ resource "aws_glue_trigger" "t_crawler_silver" {
     crawler_name = aws_glue_crawler.silver.name
   }
   predicate {
-    conditions {
-      job_name = module.silver_processing.job_name
-      state    = "SUCCEEDED"
-    }
+    conditions { job_name = module.silver_tx_curated.job_name   state = "SUCCEEDED" }
+    conditions { job_name = module.silver_tx_agg.job_name       state = "SUCCEEDED" }
+    conditions { job_name = module.silver_prov_curated.job_name state = "SUCCEEDED" }
+    conditions { job_name = module.silver_cli_curated.job_name  state = "SUCCEEDED" }
     logical = "AND"
   }
 }
