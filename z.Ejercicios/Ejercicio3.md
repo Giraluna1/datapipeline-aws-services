@@ -42,6 +42,7 @@ Catalog y gobernanza de datos de GCP) para catalogar y gobernar los activos de d
 El reto aquí fue la complejidad de la configuración de red con el VPC Shared, la parametrización 
 del Flex Template para que fuera reutilizable, y la integración con Dataplex para dejar todo 
 el lineage documentado.
+
 ---
 
 ## 2. ¿Qué estrategias has aplicado para crear los recursos necesarios en AWS y mantener una arquitectura y pipelines de datos?
