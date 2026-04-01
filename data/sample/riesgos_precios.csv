@@ -1,0 +1,4 @@
+tipo_cliente,riesgo_pct,comentario
+comercial,0.05,riesgo moderado por volatilidad de demanda
+residencial,0.02,riesgo bajo por consumo estable
+industrial,0.08,riesgo alto por sensibilidad al mercado

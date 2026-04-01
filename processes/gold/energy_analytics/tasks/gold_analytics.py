@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+"""Analítica Gold
+
+Lee datos preparados (por defecto desde la salida de Silver) y genera artefactos
+analíticos adicionales en la zona gold/analytics (Parquet). Este job es un
+ejemplo simple que calcula acumulados por tipo_energia.
+
+Entrada:
+- s3://<silver>/transacciones/
+
+Salida:
+- s3://<gold>/analytics/tipo_energia/
+"""
 import sys, json
 import boto3
 from awsglue.utils import getResolvedOptions

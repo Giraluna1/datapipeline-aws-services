@@ -34,6 +34,7 @@ resource "aws_glue_job" "job" {
       "--REDSHIFT_SECRET_ARN"    = lookup(var.job_config, "redshift_secret_arn", "")
       "--ATHENA_OUTPUT"          = lookup(var.job_config, "athena_output", "")
       "--REDSHIFT_IAM_ROLE_ARN"  = lookup(var.job_config, "redshift_iam_role_arn", "")
+      "--additional-python-modules" = lookup(var.job_config, "additional_python_modules", "awswrangler==3.10.1")
     },
     lookup(var.job_config, "additional_arguments", {})
   )
@@ -46,4 +47,12 @@ resource "aws_glue_job" "job" {
   tags = var.common_tags
 
   depends_on = [aws_s3_object.job_script]
+}
+
+output "job_name" {
+  value = aws_glue_job.job.name
+}
+
+output "job_arn" {
+  value = aws_glue_job.job.arn
 }

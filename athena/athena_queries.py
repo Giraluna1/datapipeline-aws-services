@@ -11,7 +11,7 @@ def run_athena_query(sql: str, database: str):
     return df
 
 if __name__ == "__main__":
-    db = "energy_database_prd"
+    db = os.getenv("GLUE_DATABASE", "energy_db_dev")
     sql = """
     SELECT tipo_energia, COUNT(*) AS cnt, AVG(avg_precio_kwh) as avg_price
     FROM transacciones

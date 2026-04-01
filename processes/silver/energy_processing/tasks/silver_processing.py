@@ -1,16 +1,29 @@
 #!/usr/bin/env python3
-import sys, time, json, os
+"""Procesamiento Silver → Gold
+
+Lee datasets estandarizados en bronze y publica dos vistas en gold:
+- transacciones_curated: esquema de negocio curado (equivalente al sample)
+- transacciones_agg: agregados por tipo_energia, ciudad y fecha_transaccion
+Además, si existen proveedores/clientes en bronze, los copia/tipea a gold.
+Escribe siempre en Parquet particionado por fecha de procesamiento.
+
+Entradas:
+- s3://<bronze>/transacciones/, proveedores/ y clientes/ (si existen)
+
+Salidas:
+- s3://<gold>/transacciones_curated/, transacciones_agg/, proveedores/, clientes/
+"""
+import sys, json, os
 import boto3, awswrangler as wr
 from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
 from awsglue.context import GlueContext
 from awsglue.job import Job
-from pyspark.sql.functions import col, current_date, year, month, dayofmonth
+from pyspark.sql.functions import col, current_date, year, month, dayofmonth, to_date
 
 args = getResolvedOptions(sys.argv, [
     "JOB_NAME","SRC_BUCKET","DST_BUCKET","ENVIRONMENT","SECRET_NAME",
-    "ATHENA_OUTPUT","REDSHIFT_SECRET_ARN","REDSHIFT_IAM_ROLE_ARN",
-    "REDSHIFT_DATABASE","REDSHIFT_DB_USER","REDSHIFT_CLUSTER_ID"
+    "ATHENA_OUTPUT","GLUE_DATABASE"
 ])
 
 sc = SparkContext()
@@ -31,11 +44,35 @@ def get_secret(secret_name):
 
 secrets = get_secret(args.get("SECRET_NAME","")) if args.get("SECRET_NAME") else {}
 
-s3_silver = f"s3://{args['SRC_BUCKET']}/transacciones/"
-s3_gold   = f"s3://{args['DST_BUCKET']}/transacciones/"
+s3_silver_tx   = f"s3://{args['SRC_BUCKET']}/transacciones/"
+s3_silver_prov = f"s3://{args['SRC_BUCKET']}/proveedores/"
+s3_silver_cli  = f"s3://{args['SRC_BUCKET']}/clientes/"
+s3_gold_agg   = f"s3://{args['DST_BUCKET']}/transacciones_agg/"
+s3_gold_cur   = f"s3://{args['DST_BUCKET']}/transacciones_curated/"
+s3_gold_prov  = f"s3://{args['DST_BUCKET']}/proveedores/"
+s3_gold_cli   = f"s3://{args['DST_BUCKET']}/clientes/"
 
-df = spark.read.parquet(s3_silver)
+df = spark.read.parquet(s3_silver_tx)
 
+# Curated (mantener esquema de negocio)
+df_cur = df.select(
+    col("id_transaccion").cast("string"),
+    to_date(col("fecha_transaccion")).alias("fecha_transaccion"),
+    col("tipo_transaccion").cast("string"),
+    col("cliente_proveedor").cast("string"),
+    col("cantidad_kwh").cast("double"),
+    col("precio_kwh").cast("double"),
+    col("tipo_energia").cast("string"),
+    col("hora_transaccion").cast("string"),
+    col("ciudad").cast("string"),
+)
+df_cur = df_cur.withColumn("processed_date", current_date())
+df_cur = df_cur.withColumn("year", year(col("processed_date"))) \
+               .withColumn("month", month(col("processed_date"))) \
+               .withColumn("day", dayofmonth(col("processed_date")))
+df_cur.write.mode("append").partitionBy("year","month","day").parquet(s3_gold_cur)
+
+# Agregado para analítica y DWH
 df_agg = df.groupBy("tipo_energia","ciudad","fecha_transaccion").agg(
     {"cantidad_kwh":"sum","precio_kwh":"avg"}
 ).withColumnRenamed("sum(cantidad_kwh)","total_kwh") \
@@ -46,53 +83,69 @@ df_final = df_agg.withColumn("year", year(col("processed_date"))) \
                  .withColumn("month", month(col("processed_date"))) \
                  .withColumn("day", dayofmonth(col("processed_date")))
 
-(df_final.write.mode("append").partitionBy("year","month","day").parquet(s3_gold))
+df_final.write.mode("append").partitionBy("year","month","day").parquet(s3_gold_agg)
 
-# Athena validation
+try:
+    df_prov = spark.read.parquet(s3_silver_prov)
+    df_prov = df_prov.withColumn("capacidad_mw", col("capacidad_mw").cast("double"))
+    if "fecha_contrato" in df_prov.columns:
+        df_prov = df_prov.withColumn("fecha_contrato", to_date(col("fecha_contrato")))
+    df_prov = df_prov.withColumn("processed_date", current_date())
+    df_prov = df_prov.withColumn("year", year(col("processed_date"))) \
+                     .withColumn("month", month(col("processed_date"))) \
+                     .withColumn("day", dayofmonth(col("processed_date")))
+    df_prov.write.mode("append").partitionBy("year","month","day").parquet(s3_gold_prov)
+    print("Proveedores curated written")
+except Exception as e:
+    print("Skipping proveedores:", e)
+
+try:
+    df_cli = spark.read.parquet(s3_silver_cli)
+    df_cli = df_cli.withColumn("processed_date", current_date())
+    df_cli = df_cli.withColumn("year", year(col("processed_date"))) \
+                   .withColumn("month", month(col("processed_date"))) \
+                   .withColumn("day", dayofmonth(col("processed_date")))
+    df_cli.write.mode("append").partitionBy("year","month","day").parquet(s3_gold_cli)
+    print("Clientes curated written")
+except Exception as e:
+    print("Skipping clientes:", e)
+
 try:
     session = boto3.Session()
-    sql = "SELECT COUNT(*) AS total FROM transacciones WHERE year = year(current_date) LIMIT 1"
-    df_check = wr.athena.read_sql_query(sql=sql, database=os.environ.get("GLUE_DATABASE","energy_db"),
-                                        s3_output=args.get("ATHENA_OUTPUT"), boto3_session=session)
-    print("Athena check:", df_check.head())
+    glue_db = args.get("GLUE_DATABASE") or os.environ.get("GLUE_DATABASE")
+    output_loc = args.get("ATHENA_OUTPUT")
+    if glue_db and output_loc:
+        ath = boto3.client("athena")
+        def run_ddl(sql):
+            q = ath.start_query_execution(
+                QueryString=sql,
+                QueryExecutionContext={"Database": glue_db},
+                ResultConfiguration={"OutputLocation": output_loc}
+            )
+            qid = q["QueryExecutionId"]
+            while True:
+                d = ath.get_query_execution(QueryExecutionId=qid)
+                s = d["QueryExecution"]["Status"]["State"]
+                if s in ("SUCCEEDED","FAILED","CANCELLED"): break
+        run_ddl("CREATE OR REPLACE VIEW v_servicio AS SELECT DISTINCT tipo_energia FROM transacciones")
+        run_ddl("CREATE OR REPLACE VIEW v_ventas AS SELECT * FROM transacciones WHERE lower(tipo_transaccion)='venta'")
+        run_ddl("CREATE OR REPLACE VIEW v_compras AS SELECT * FROM transacciones WHERE lower(tipo_transaccion)='compra'")
+        run_ddl("""
+        CREATE OR REPLACE VIEW v_clientes AS
+        SELECT t.cliente_proveedor AS cliente,
+               coalesce(max(c.tipo_cliente), 'desconocido') AS tipo_cliente,
+               max(t.ciudad) AS ciudad
+        FROM transacciones t
+        LEFT JOIN clientes c
+          ON t.cliente_proveedor = c.cliente_proveedor
+        WHERE t.cliente_proveedor IS NOT NULL
+        GROUP BY t.cliente_proveedor
+        """)
+        print("Athena logical model created: v_servicio, v_ventas, v_compras, v_clientes")
+    else:
+        print("ATHENA_OUTPUT or GLUE_DATABASE not provided; skipping Athena views.")
 except Exception as e:
     print("Athena validation failed/skipped:", e)
-
-# Redshift load using Data API + COPY (requires IAM role attached to cluster)
-iam_role = args.get("REDSHIFT_IAM_ROLE_ARN")
-if iam_role:
-    redshift = boto3.client("redshift-data")
-    table = "analytics.transacciones_agg"
-    create_sql = f"""
-    CREATE TABLE IF NOT EXISTS {table} (
-      tipo_energia VARCHAR(64),
-      ciudad VARCHAR(128),
-      fecha_transaccion DATE,
-      total_kwh DOUBLE PRECISION,
-      avg_precio_kwh DOUBLE PRECISION,
-      processed_date DATE
-    );
-    """
-    try:
-        exec_create = {"Sql": create_sql, "Database": args.get("REDSHIFT_DATABASE"), "DbUser": args.get("REDSHIFT_DB_USER")}
-        if args.get("REDSHIFT_CLUSTER_ID"): exec_create["ClusterIdentifier"] = args.get("REDSHIFT_CLUSTER_ID")
-        if args.get("REDSHIFT_SECRET_ARN"): exec_create["SecretArn"] = args.get("REDSHIFT_SECRET_ARN")
-        resp = redshift.execute_statement(**exec_create)
-        stmt_id = resp["Id"]
-        while True:
-            desc = redshift.describe_statement(Id=stmt_id)
-            if desc["Status"] in ("FINISHED","FAILED","ABORTED"): break
-            time.sleep(1)
-        copy_sql = f"COPY {table} FROM '{s3_gold}' IAM_ROLE '{iam_role}' FORMAT AS PARQUET;"
-        exec_copy = {"Sql": copy_sql, "Database": args.get("REDSHIFT_DATABASE"), "DbUser": args.get("REDSHIFT_DB_USER")}
-        if args.get("REDSHIFT_CLUSTER_ID"): exec_copy["ClusterIdentifier"] = args.get("REDSHIFT_CLUSTER_ID")
-        if args.get("REDSHIFT_SECRET_ARN"): exec_copy["SecretArn"] = args.get("REDSHIFT_SECRET_ARN")
-        resp2 = redshift.execute_statement(**exec_copy)
-        print("Triggered COPY to Redshift, id:", resp2.get("Id"))
-    except Exception as e:
-        print("Redshift load failed/skipped:", e)
-else:
-    print("REDSHIFT_IAM_ROLE_ARN not provided; skipping Redshift load.")
 
 job.commit()
 print("Silver -> Gold completed.")

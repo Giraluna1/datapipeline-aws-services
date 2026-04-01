@@ -1,0 +1,11 @@
+id_transaccion,fecha_transaccion,tipo_transaccion,cliente_proveedor,cantidad_kwh,precio_kwh,tipo_energia,hora_transaccion,ciudad
+TXN001,2024-01-15,compra,Eólica del Norte,5000.0,0.12,eólica,14:30:00,Barranquilla
+TXN002,2024-01-15,venta,Juan Pérez Residencial,350.5,0.18,eólica,15:45:00,Bogotá
+TXN003,2024-01-15,compra,Hidroeléctrica Guatapé,8000.0,0.10,hidroeléctrica,16:00:00,Medellín
+TXN004,2024-01-15,venta,Textiles Colombia SA,2600.8,0.16,hidroeléctrica,16:30:00,Medellín
+TXN005,2024-01-16,compra,Nuclear Atlántico,12000.0,0.08,nuclear,08:15:00,Santa Marta
+TXN006,2024-01-16,venta,Supermercados del Valle,1490.5,0.17,nuclear,09:20:00,Cali
+TXN007,2024-01-16,compra,Vientos de la Guajira,3500.0,0.11,eólica,10:45:00,Riohacha
+TXN008,2024-01-16,venta,Centro Comercial Andino,3116.8,0.19,eólica,11:30:00,Bogotá
+TXN009,2024-01-17,compra,Solar Santander,1200.0,0.13,solar,12:00:00,Bucaramanga
+TXN010,2024-01-17,venta,Fábrica de Alimentos SAS,2133.4,0.15,solar,13:15:00,Bogotá

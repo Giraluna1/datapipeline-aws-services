@@ -1,0 +1,11 @@
+nombre_proveedor,tipo_energia,capacidad_mw,ciudad,fecha_contrato
+Eólica del Norte,eólica,150.5,Barranquilla,2023-01-15
+Hidroeléctrica Guatapé,hidroeléctrica,560.0,Medellín,2022-08-20
+Nuclear Atlántico,nuclear,1200.0,Santa Marta,2021-11-10
+Vientos de la Guajira,eólica,200.3,Riohacha,2023-03-22
+Central Térmica Bogotá,térmica,450.0,Bogotá,2022-12-05
+Hidroeléctrica del Cauca,hidroeléctrica,380.2,Cali,2023-02-14
+Solar Santander,solar,95.8,Bucaramanga,2023-04-18
+Eólica Cesar,eólica,175.6,Valledupar,2023-01-30
+Hidroeléctrica Boyacá,hidroeléctrica,220.1,Tunja,2022-09-12
+Geotérmica Nariño,geotérmica,85.0,Pasto,2023-05-20
